@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Boeing Aircraft Maintenance Report System - An AI-powered maintenance report management system that ingests maintenance reports, classifies them according to ATA Spec 100 and iSpec 2200 standards, and provides RAG-powered natural language queries.
 
-**Current Status**: Phase 3 complete (Classification System). Real-time classification of maintenance reports with ATA chapter mapping, part identification, and defect type detection. Mock endpoints remain for vector store and RAG pipeline (Phase 4-5).
+**Current Status**: Phase 4 complete (Vector Store Implementation). Real-time classification and persistent storage of maintenance reports with pgvector integration, embedding generation, and similarity search. RAG pipeline implementation remains (Phase 5).
 
 ## Development Commands
 
@@ -25,6 +25,9 @@ python test_app.py
 
 # Test classification system (Phase 3)
 python test_classification.py
+
+# Test vector store implementation (Phase 4)
+python test_vectorstore.py
 
 # Run tests (when implemented)
 pytest
@@ -56,9 +59,10 @@ cf restart boeing-maintenance-system
 - **FastAPI Application**: `app/main.py` - Main entry point with CORS, routers, startup/shutdown events
 - **Configuration**: `app/config.py` - VCAP_SERVICES parsing and environment management
 - **Health Checks**: `app/health.py` - Comprehensive health monitoring endpoints
-- **Reports Management**: `app/reports.py` - File upload, ingestion, listing with real-time classification
+- **Reports Management**: `app/reports.py` - File upload, ingestion, listing with real-time classification and persistent storage
 - **Query Processing**: `app/query.py` - Natural language queries with mock RAG pipeline
 - **Classification System**: `app/classification/` - ATA, iSpec 2200, and defect type classification (Phase 3)
+- **Vector Store System**: `app/vectorstore/` - pgvector integration, embedding generation, and similarity search (Phase 4)
 
 ### Configuration System
 The app uses VCAP_SERVICES (Cloud Foundry) for service binding configuration:
@@ -73,10 +77,16 @@ The classification system uses a multi-layered approach:
 - **Defect Type Classifier**: `type_classifier.py` - Detects defect types, maintenance actions, and severity levels
 - **Classifier Service**: `classifier_service.py` - Orchestrates all classifiers with cross-validation and metadata enhancement
 
+### Vector Store Architecture (Phase 4 - Implemented)
+The vector store system provides persistent storage and similarity search:
+- **Database Models**: `models.py` - SQLAlchemy models with pgvector support for maintenance reports and query history
+- **Embedding Service**: `embedding_service.py` - Text-to-vector conversion using GenAI service with batch processing
+- **Vector Store Service**: `vectorstore_service.py` - CRUD operations, similarity search, and database management
+- **Integration**: Automatic initialization in `main.py` with fallback to localhost PostgreSQL credentials
+
 ### Planned Architecture (Future Phases)
-- **Vector Store**: `app/vectorstore/` - pgvector integration for embeddings
-- **RAG Pipeline**: `app/rag/` - Retrieval-Augmented Generation implementation
-- **GenAI Client**: `app/genai/` - Tanzu GenAI service integration
+- **RAG Pipeline**: `app/rag/` - Retrieval-Augmented Generation implementation  
+- **GenAI Client**: `app/genai/` - Enhanced Tanzu GenAI service integration
 
 ## Key APIs
 
@@ -86,13 +96,15 @@ The classification system uses a multi-layered approach:
 - `GET /api/health/live` - Liveness check
 - `GET /api/health/detailed` - Comprehensive system status
 
-### Reports (Enhanced with Classification)
-- `POST /api/reports/upload` - Batch file upload with real-time classification (.txt, .csv)
-- `POST /api/reports/ingest` - Single report ingestion with classification
+### Reports (Enhanced with Classification and Vector Storage)
+- `POST /api/reports/upload` - Batch file upload with real-time classification and storage (.txt, .csv)
+- `POST /api/reports/ingest` - Single report ingestion with classification and storage
 - `POST /api/reports/classify` - Test classification without storing (Phase 3)
+- `POST /api/reports/search` - Semantic similarity search using vector embeddings (Phase 4)
 - `GET /api/reports/classification/health` - Classification system health check (Phase 3)
-- `GET /api/reports/` - List with pagination and filtering
-- `GET /api/reports/{id}` - Individual report details
+- `GET /api/reports/vectorstore/health` - Vector store system health check (Phase 4)
+- `GET /api/reports/` - List with pagination and filtering from persistent storage
+- `GET /api/reports/{id}` - Individual report details from persistent storage
 
 ### Natural Language Queries
 - `POST /api/query` - Process natural language queries
@@ -138,10 +150,52 @@ classification = service.classify_report(
 
 **Cross-Validation Rules**: The system validates classifications across different classifiers (e.g., ATA 32 + gear parts = consistent)
 
+### Vector Store Implementation (Phase 4)
+The vector store system is fully operational with persistent PostgreSQL storage and semantic search:
+- **Persistent Storage**: All maintenance reports stored in PostgreSQL with pgvector extension
+- **Embedding Generation**: Text-to-vector conversion using GenAI service (1536-dimensional embeddings)
+- **Similarity Search**: Semantic search using cosine distance with configurable thresholds
+- **Batch Processing**: Efficient batch storage and embedding generation for file uploads
+- **Database Fallback**: Automatic fallback to localhost:5432 with postgres/postgres credentials
+
+### Vector Store Usage
+The vector store integrates seamlessly with classification and provides persistent storage:
+
+```python
+from app.vectorstore import VectorStoreService, EmbeddingService
+
+# Initialize services (handled automatically in main.py)
+embedding_service = EmbeddingService(api_key, base_url)
+vector_store = VectorStoreService(database_url, embedding_service)
+
+# Store classified report
+report_id = await vector_store.store_report(
+    report_text="Found hydraulic leak at nose gear actuator",
+    classification=classification_results,
+    aircraft_model="Boeing 737-800"
+)
+
+# Semantic search
+results = await vector_store.similarity_search(
+    query_text="hydraulic problems",
+    limit=10,
+    similarity_threshold=0.7
+)
+```
+
+**Key Vector Store Features:**
+- **Automatic Database Setup**: Creates tables and enables pgvector extension on startup
+- **Embedding Caching**: Efficient embedding generation with batch processing
+- **Filtered Search**: Similarity search with ATA chapter, severity, and defect type filters  
+- **Query History**: Persistent storage of queries and responses for analytics
+- **Health Monitoring**: Comprehensive health checks for database and embedding service
+
 ### Testing Strategy
 - Use `python test_app.py` to verify module imports and configuration
 - Use `python test_classification.py` to test the classification system with sample data
-- Health endpoints provide immediate feedback on service configuration
+- Use `python test_vectorstore.py` to test the complete Phase 4 vector store implementation
+- Health endpoints provide immediate feedback on service and database configuration
 - Classification endpoints can be tested with real maintenance report text
-- Sample test data is available in `test_data_reports.py` and `sample_reports.txt`
-- All endpoints include proper validation and error handling
+- Vector store endpoints support both real GenAI embeddings and mock embeddings for testing
+- Sample test data is available in `test_data_reports.py`, `sample_reports.txt`, and `test_vectorstore.py`
+- All endpoints include proper validation, error handling, and graceful fallback

@@ -12,8 +12,11 @@ import logging
 
 from app.config import get_settings
 from app.health import health_router
-from app.reports import reports_router
+from app.reports import reports_router, set_vector_store_service
 from app.query import query_router
+
+# Vector store imports - Phase 4 implementation
+from app.vectorstore import VectorStoreService, EmbeddingService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -50,6 +53,37 @@ async def startup_event():
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"Database URL configured: {bool(settings.database_url)}")
     logger.info(f"GenAI API configured: {bool(settings.genai_api_key)}")
+    
+    # Initialize vector store service if credentials available (Phase 4)
+    if settings.database_url and settings.genai_api_key and settings.genai_api_url:
+        try:
+            # Initialize embedding service
+            embedding_service = EmbeddingService(
+                api_key=settings.genai_api_key,
+                base_url=settings.genai_api_url
+            )
+            
+            # Initialize vector store service
+            vector_store = VectorStoreService(
+                database_url=settings.database_url,
+                embedding_service=embedding_service
+            )
+            
+            # Initialize database (create tables and extensions)
+            db_initialized = await vector_store.initialize_database()
+            if db_initialized:
+                # Set the vector store service in reports module
+                set_vector_store_service(vector_store)
+                logger.info("Vector store service initialized successfully (Phase 4)")
+            else:
+                logger.warning("Vector store database initialization failed")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize vector store service: {e}")
+            logger.info("Application will run without vector store (Phase 3 mode)")
+    else:
+        logger.info("Vector store not initialized - missing database or GenAI credentials")
+        logger.info("Application running in Phase 3 mode (classification only)")
 
 @app.on_event("shutdown")
 async def shutdown_event():

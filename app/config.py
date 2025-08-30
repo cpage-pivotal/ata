@@ -17,14 +17,14 @@ class Settings:
         self.debug = os.getenv('DEBUG', 'true').lower() == 'true'
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
         
-        # Database
-        self.database_url = os.getenv('DATABASE_URL')
+        # Database - default to localhost fallback
+        self.database_url = os.getenv('DATABASE_URL', 'postgresql+asyncpg://postgres:postgres@localhost:5432/boeing_maintenance')
         
         # GenAI Service
         self.genai_api_key = os.getenv('GENAI_API_KEY')
         self.genai_api_url = os.getenv('GENAI_API_URL')
         
-        # Load from VCAP_SERVICES if available
+        # Load from VCAP_SERVICES if available (will override defaults)
         self._load_vcap_services()
     
     def _load_vcap_services(self):
