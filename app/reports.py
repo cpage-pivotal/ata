@@ -10,10 +10,11 @@ import logging
 from datetime import datetime
 import io
 
-# Placeholder imports - will be implemented in later phases
-# from app.classification.classifier_service import ClassifierService
-# from app.vectorstore.vectorstore_service import VectorStoreService
-# from app.models.report import MaintenanceReport, ReportCreate
+# Classification system imports - Phase 3 implementation
+from app.classification import ClassifierService
+
+# Initialize classification service
+classifier_service = ClassifierService()
 
 logger = logging.getLogger(__name__)
 reports_router = APIRouter()
@@ -51,16 +52,49 @@ async def upload_reports(
                 detail="File contains no valid reports"
             )
         
-        # TODO: Implement actual processing in later phases
-        # For now, return mock response
+        # Process reports with classification system (Phase 3 implementation)
+        processed_reports = []
+        classification_stats = {"classified": 0, "failed": 0}
+        
+        for i, report_text in enumerate(reports[:10], 1):  # Limit to 10 reports for demo
+            try:
+                # Classify the report
+                classification = classifier_service.classify_report(
+                    report_text, 
+                    {"aircraft_type": aircraft_model} if aircraft_model else None
+                )
+                
+                # Get classification summary
+                summary = classifier_service.get_classification_summary(classification)
+                
+                processed_reports.append({
+                    "report_number": i,
+                    "report_text": report_text[:100] + "..." if len(report_text) > 100 else report_text,
+                    "classification": summary
+                })
+                
+                classification_stats["classified"] += 1
+                
+            except Exception as e:
+                logger.error(f"Failed to classify report {i}: {e}")
+                processed_reports.append({
+                    "report_number": i,
+                    "report_text": report_text[:100] + "..." if len(report_text) > 100 else report_text,
+                    "classification": {"error": f"Classification failed: {str(e)}"}
+                })
+                classification_stats["failed"] += 1
+        
         upload_result = {
-            "status": "uploaded",
+            "status": "processed",
             "filename": file.filename,
             "total_reports": len(reports),
+            "processed_reports": min(len(reports), 10),  # Limited for demo
             "batch_id": batch_id or f"batch_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
             "aircraft_model": aircraft_model,
             "uploaded_at": datetime.utcnow().isoformat(),
-            "message": "File uploaded successfully. Processing will be implemented in Phase 3."
+            "classification_stats": classification_stats,
+            "sample_results": processed_reports[:3],  # Show first 3 as samples
+            "message": f"File processed successfully with Phase 3 classification system. Classified {classification_stats['classified']} reports."
         }
         
         logger.info(f"File uploaded: {file.filename} with {len(reports)} reports")
@@ -92,22 +126,43 @@ async def ingest_single_report(
                 detail="Report text cannot be empty"
             )
         
-        # TODO: Implement actual ingestion in later phases
-        # For now, return mock response
-        ingestion_result = {
-            "status": "ingested",
-            "report_id": f"report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}",
-            "report_text": report_text[:100] + "..." if len(report_text) > 100 else report_text,
-            "aircraft_model": aircraft_model,
-            "report_date": report_date or datetime.utcnow().isoformat(),
-            "ingested_at": datetime.utcnow().isoformat(),
-            "classification": {
-                "ata_chapter": "pending",  # Will be implemented in Phase 3
-                "ispec_part": "pending",   # Will be implemented in Phase 3
-                "defect_type": "pending"   # Will be implemented in Phase 3
-            },
-            "message": "Report ingested successfully. Classification will be implemented in Phase 3."
-        }
+        # Process report with classification system (Phase 3 implementation)
+        try:
+            # Classify the report
+            classification = classifier_service.classify_report(
+                report_text, 
+                {
+                    "aircraft_type": aircraft_model,
+                    "report_date": report_date
+                } if aircraft_model or report_date else None
+            )
+            
+            # Get classification summary
+            classification_summary = classifier_service.get_classification_summary(classification)
+            
+            ingestion_result = {
+                "status": "ingested_and_classified",
+                "report_id": f"report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}",
+                "report_text": report_text[:200] + "..." if len(report_text) > 200 else report_text,
+                "aircraft_model": aircraft_model,
+                "report_date": report_date or datetime.utcnow().isoformat(),
+                "ingested_at": datetime.utcnow().isoformat(),
+                "classification": classification_summary,
+                "message": "Report ingested and classified successfully using Phase 3 classification system."
+            }
+            
+        except Exception as classification_error:
+            logger.error(f"Classification failed for single report: {classification_error}")
+            ingestion_result = {
+                "status": "ingested_with_classification_error",
+                "report_id": f"report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}",
+                "report_text": report_text[:200] + "..." if len(report_text) > 200 else report_text,
+                "aircraft_model": aircraft_model,
+                "report_date": report_date or datetime.utcnow().isoformat(),
+                "ingested_at": datetime.utcnow().isoformat(),
+                "classification_error": str(classification_error),
+                "message": "Report ingested but classification failed. Manual review may be required."
+            }
         
         logger.info(f"Single report ingested: {ingestion_result['report_id']}")
         
@@ -219,6 +274,69 @@ async def get_report(report_id: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Report retrieval failed: {e}")
         raise HTTPException(status_code=500, detail="Report retrieval failed")
+
+@reports_router.post("/classify")
+async def classify_report_text(
+    report_text: str = Form(...),
+    aircraft_model: Optional[str] = Form(None)
+) -> Dict[str, Any]:
+    """
+    Classify a maintenance report without storing it
+    
+    Useful for testing the classification system or getting classification
+    results before deciding whether to ingest a report
+    """
+    try:
+        if not report_text.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Report text cannot be empty"
+            )
+        
+        # Classify the report
+        classification = classifier_service.classify_report(
+            report_text, 
+            {"aircraft_type": aircraft_model} if aircraft_model else None
+        )
+        
+        # Get detailed classification results
+        classification_dict = classifier_service.to_dict(classification)
+        summary = classifier_service.get_classification_summary(classification)
+        
+        return {
+            "status": "classified",
+            "report_text": report_text[:200] + "..." if len(report_text) > 200 else report_text,
+            "aircraft_model": aircraft_model,
+            "classification_summary": summary,
+            "detailed_classification": classification_dict,
+            "classified_at": datetime.utcnow().isoformat(),
+            "message": "Report classified successfully using Phase 3 classification system."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Report classification failed: {e}")
+        raise HTTPException(status_code=500, detail="Report classification failed")
+
+@reports_router.get("/classification/health")
+async def get_classification_health() -> Dict[str, Any]:
+    """
+    Get health status of the classification system
+    
+    Returns status of all classification components
+    """
+    try:
+        health_status = classifier_service.get_health_status()
+        return health_status
+        
+    except Exception as e:
+        logger.error(f"Classification health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "message": "Classification system health check failed"
+        }
 
 @reports_router.get("/stats/summary")
 async def get_report_stats() -> Dict[str, Any]:
