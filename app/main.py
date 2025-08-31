@@ -13,10 +13,14 @@ import logging
 from app.config import get_settings
 from app.health import health_router
 from app.reports import reports_router, set_vector_store_service
-from app.query import query_router
+from app.query import query_router, set_rag_pipeline
 
 # Vector store imports - Phase 4 implementation
 from app.vectorstore import VectorStoreService, EmbeddingService
+
+# RAG pipeline imports - Phase 5 implementation
+from app.genai import GenAIClient, ChatService, ModelService
+from app.rag import RAGPipeline, Retriever, Generator
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -54,7 +58,7 @@ async def startup_event():
     logger.info(f"Database URL configured: {bool(settings.database_url)}")
     logger.info(f"GenAI API configured: {bool(settings.genai_api_key)}")
     
-    # Initialize vector store service if credentials available (Phase 4)
+    # Initialize vector store and RAG pipeline if credentials available (Phase 4 & 5)
     if settings.database_url and settings.genai_api_key and settings.genai_api_url:
         try:
             # Initialize embedding service
@@ -75,6 +79,42 @@ async def startup_event():
                 # Set the vector store service in reports module
                 set_vector_store_service(vector_store)
                 logger.info("Vector store service initialized successfully (Phase 4)")
+                
+                # Initialize RAG pipeline (Phase 5)
+                try:
+                    # Initialize GenAI client
+                    genai_client = GenAIClient(
+                        api_key=settings.genai_api_key,
+                        base_url=settings.genai_api_url
+                    )
+                    
+                    # Initialize model service and discover models
+                    model_service = ModelService(genai_client.get_sync_client())
+                    best_chat_model = model_service.get_best_chat_model()
+                    
+                    if best_chat_model:
+                        # Initialize chat service
+                        chat_service = ChatService(
+                            client=genai_client.get_sync_client(),
+                            async_client=genai_client.get_async_client(),
+                            model=best_chat_model
+                        )
+                        
+                        # Initialize RAG components
+                        retriever = Retriever(vector_store)
+                        generator = Generator(chat_service)
+                        rag_pipeline = RAGPipeline(retriever, generator, vector_store)
+                        
+                        # Set RAG pipeline in query module
+                        set_rag_pipeline(rag_pipeline)
+                        logger.info(f"RAG pipeline initialized successfully with model: {best_chat_model} (Phase 5)")
+                    else:
+                        logger.warning("No suitable chat model found - RAG pipeline not initialized")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to initialize RAG pipeline: {e}")
+                    logger.info("Application will run with vector store only (Phase 4 mode)")
+                    
             else:
                 logger.warning("Vector store database initialization failed")
                 
