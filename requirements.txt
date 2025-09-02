@@ -10,6 +10,7 @@ psycopg2-binary>=2.9.0
 
 # Vector Database
 pgvector>=0.2.0
+greenlet>=3.0.0
 
 # AI and ML
 openai>=1.0.0

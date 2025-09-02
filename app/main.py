@@ -64,7 +64,8 @@ async def startup_event():
             # Initialize embedding service
             embedding_service = EmbeddingService(
                 api_key=settings.genai_api_key,
-                base_url=settings.genai_api_url
+                base_url=settings.genai_api_url,
+                model=settings.embedding_model
             )
             
             # Initialize vector store service
