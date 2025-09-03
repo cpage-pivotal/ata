@@ -2,25 +2,32 @@
 Boeing Aircraft Maintenance Report System
 Main FastAPI application entry point
 """
+from pathlib import Path
+from dotenv import load_dotenv
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-import uvicorn
-from typing import List, Optional
+# Load environment variables from .env file
+env_file = Path(__file__).parent.parent / '.env'
+if env_file.exists():
+    load_dotenv(env_file)
+    print(f"✅ Loaded environment from: {env_file}")
+else:
+    print("⚠️  .env file not found, using system environment variables")
+
 import logging
 
+import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from app.config import get_settings
-from app.health import health_router
-from app.reports import reports_router, set_vector_store_service
-from app.query import query_router, set_rag_pipeline
-
-# Vector store imports - Phase 4 implementation
-from app.vectorstore import VectorStoreService, EmbeddingService
-
 # RAG pipeline imports - Phase 5 implementation
 from app.genai import GenAIClient, ChatService, ModelService
+from app.health import health_router
+from app.query import query_router, set_rag_pipeline
 from app.rag import RAGPipeline, Retriever, Generator
+from app.reports import reports_router, set_vector_store_service
+# Vector store imports - Phase 4 implementation
+from app.vectorstore import VectorStoreService, EmbeddingService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

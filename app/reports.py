@@ -3,19 +3,19 @@ Reports router for Boeing Aircraft Maintenance Report System
 Handles maintenance report upload, ingestion, and retrieval
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
-from fastapi.responses import JSONResponse
-from typing import List, Optional, Dict, Any
 import logging
 from datetime import datetime
-import io
+from typing import Dict, Any
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 # Classification system imports - Phase 3 implementation
 from app.classification import ClassifierService
-
 # Vector store imports - Phase 4 implementation
-from app.vectorstore import VectorStoreService, EmbeddingService
-from app.config import get_settings
+from app.vectorstore import VectorStoreService
 
 # Initialize services
 classifier_service = ClassifierService()
@@ -554,55 +554,143 @@ async def get_vectorstore_health() -> Dict[str, Any]:
 async def get_report_stats() -> Dict[str, Any]:
     """
     Get summary statistics for maintenance reports
-    
-    Returns counts by ATA chapter, aircraft model, and defect type
+    Simplified version that works directly with the database
     """
     try:
-        # Use vector store if available, otherwise fall back to mock data
-        if vector_store_service:
-            try:
-                stats = await vector_store_service.get_stats()
-                stats["last_updated"] = datetime.utcnow().isoformat()
-                stats["message"] = "Statistics retrieved from vector database (Phase 4)"
-            except Exception as e:
-                logger.error(f"Failed to get stats from vector store: {e}")
-                # Fall back to mock stats
-                stats = {
-                    "total_reports": 0,
-                    "by_ata_chapter": {},
-                    "by_aircraft_model": {},
-                    "by_defect_type": {},
-                    "last_updated": datetime.utcnow().isoformat(),
-                    "message": "Using mock data - vector database not available"
-                }
-        else:
-            # Mock response when vector store not available
-            stats = {
+        logger.info("Getting report statistics...")
+
+        # Get database URL from environment or config
+        from app.config import get_settings
+        settings = get_settings()
+
+        if not settings.database_url:
+            logger.error("No database URL configured")
+            return {
                 "total_reports": 0,
-                "by_ata_chapter": {
-                    "32": 0,  # Landing Gear
-                    "27": 0,  # Flight Controls
-                    "21": 0,  # Air Conditioning
-                    "53": 0   # Fuselage
-                },
-                "by_aircraft_model": {
-                    "Boeing 737-800": 0,
-                    "Boeing 737-900": 0,
-                    "Boeing 787": 0
-                },
-                "by_defect_type": {
-                    "corrosion": 0,
-                    "crack": 0,
-                    "leak": 0,
-                    "wear": 0
-                },
+                "safety_critical_count": 0,
+                "recent_reports_count": 0,
+                "reports_by_ata_chapter": {},
+                "reports_by_severity": {},
+                "reports_by_aircraft_model": {},
                 "last_updated": datetime.utcnow().isoformat(),
-                "message": "Using mock data - vector database not available"
+                "data_source": "error",
+                "message": "Database URL not configured"
             }
-        
-        return stats
-        
+
+        # Create database engine and query directly
+        engine = create_async_engine(settings.database_url)
+
+        async with engine.begin() as conn:
+            # Check if table exists
+            table_check = await conn.execute(text("""
+                                                  SELECT EXISTS (
+                                                      SELECT FROM information_schema.tables
+                                                      WHERE table_schema = 'public'
+                                                        AND table_name = 'maintenance_reports'
+                                                  )
+                                                  """))
+
+            table_exists = table_check.fetchone()[0]
+
+            if not table_exists:
+                await engine.dispose()
+                logger.warning("maintenance_reports table not found")
+                return {
+                    "total_reports": 0,
+                    "safety_critical_count": 0,
+                    "recent_reports_count": 0,
+                    "reports_by_ata_chapter": {},
+                    "reports_by_severity": {},
+                    "reports_by_aircraft_model": {},
+                    "last_updated": datetime.utcnow().isoformat(),
+                    "data_source": "database",
+                    "message": "maintenance_reports table not found"
+                }
+
+            # Get total count
+            total_result = await conn.execute(text("SELECT COUNT(*) FROM maintenance_reports"))
+            total_reports = total_result.fetchone()[0]
+
+            # Get safety critical count (handle various boolean formats)
+            safety_result = await conn.execute(text("""
+                                                    SELECT COUNT(*) FROM maintenance_reports
+                                                    WHERE safety_critical = 'true'
+                                                       OR safety_critical = 'True'
+                                                       OR safety_critical::text = 'true'
+                   OR (safety_critical ~ '^(true|True|TRUE)$')
+                                                    """))
+            safety_critical_count = safety_result.fetchone()[0]
+
+            # Get recent reports count (last 30 days)
+            recent_result = await conn.execute(text("""
+                                                    SELECT COUNT(*) FROM maintenance_reports
+                                                    WHERE created_at >= NOW() - INTERVAL '30 days'
+                                                    """))
+            recent_reports_count = recent_result.fetchone()[0]
+
+            # Get ATA chapter distribution
+            ata_result = await conn.execute(text("""
+                                                 SELECT
+                                                     COALESCE(ata_chapter, 'Unknown') as chapter,
+                                                     COUNT(*) as count
+                                                 FROM maintenance_reports
+                                                 GROUP BY ata_chapter
+                                                 ORDER BY COUNT(*) DESC
+                                                 """))
+            ata_counts = {str(row[0]): int(row[1]) for row in ata_result.fetchall()}
+
+            # Get severity distribution
+            severity_result = await conn.execute(text("""
+                                                      SELECT
+                                                          COALESCE(severity, 'Unknown') as severity,
+                                                          COUNT(*) as count
+                                                      FROM maintenance_reports
+                                                      GROUP BY severity
+                                                      ORDER BY COUNT(*) DESC
+                                                      """))
+            severity_counts = {str(row[0]): int(row[1]) for row in severity_result.fetchall()}
+
+            # Get aircraft model distribution
+            model_result = await conn.execute(text("""
+                                                   SELECT
+                                                       COALESCE(aircraft_model, 'Unknown') as model,
+                                                       COUNT(*) as count
+                                                   FROM maintenance_reports
+                                                   GROUP BY aircraft_model
+                                                   ORDER BY COUNT(*) DESC
+                                                   """))
+            model_counts = {str(row[0]): int(row[1]) for row in model_result.fetchall()}
+
+            # Format response for Dashboard component
+            formatted_stats = {
+                "total_reports": total_reports,
+                "safety_critical_count": safety_critical_count,
+                "recent_reports_count": recent_reports_count,
+                "reports_by_ata_chapter": ata_counts,
+                "reports_by_severity": severity_counts,
+                "reports_by_aircraft_model": model_counts,
+                "last_updated": datetime.utcnow().isoformat(),
+                "data_source": "direct_database",
+                "message": f"Statistics retrieved successfully: {total_reports} reports found"
+            }
+
+        await engine.dispose()
+
+        logger.info(f"Retrieved stats successfully: {total_reports} reports, {len(ata_counts)} ATA chapters")
+        return formatted_stats
+
     except Exception as e:
         logger.error(f"Statistics retrieval failed: {e}")
-        raise HTTPException(status_code=500, detail="Statistics retrieval failed")
 
+        # Return mock data with error info
+        return {
+            "total_reports": 0,
+            "safety_critical_count": 0,
+            "recent_reports_count": 0,
+            "reports_by_ata_chapter": {},
+            "reports_by_severity": {},
+            "reports_by_aircraft_model": {},
+            "last_updated": datetime.utcnow().isoformat(),
+            "data_source": "error",
+            "message": f"Database query failed: {str(e)}"
+        }
