@@ -22,7 +22,7 @@ async def health_check() -> Dict[str, Any]:
     """
     try:
         settings = get_settings()
-        
+
         health_status = {
             "status": "healthy",
             "timestamp": datetime.utcnow().isoformat(),
@@ -35,18 +35,18 @@ async def health_check() -> Dict[str, Any]:
                 "genai": "unknown"      # Will be updated when GenAI client is implemented
             }
         }
-        
+
         # Check configuration
-        if settings.database.database_url:
+        if settings.database_url:
             health_status["checks"]["database"] = "configured"
         else:
             health_status["checks"]["database"] = "not_configured"
-        
-        if settings.genai.genai_api_key:
+
+        if settings.genai_api_key:
             health_status["checks"]["genai"] = "configured"
         else:
             health_status["checks"]["genai"] = "not_configured"
-        
+
         # Overall status based on critical checks
         critical_checks = ["database", "genai"]
         if all(health_status["checks"][check] == "configured" for check in critical_checks):
@@ -55,9 +55,9 @@ async def health_check() -> Dict[str, Any]:
             health_status["status"] = "degraded"
         else:
             health_status["status"] = "unhealthy"
-        
+
         return health_status
-        
+
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=500, detail="Health check failed")
@@ -70,13 +70,13 @@ async def readiness_check() -> Dict[str, Any]:
     """
     try:
         settings = get_settings()
-        
+
         # Check if critical services are configured
-        database_ready = bool(settings.database.database_url)
-        genai_ready = bool(settings.genai.genai_api_key)
-        
+        database_ready = bool(settings.database_url)
+        genai_ready = bool(settings.genai_api_key)
+
         ready = database_ready and genai_ready
-        
+
         readiness_status = {
             "ready": ready,
             "timestamp": datetime.utcnow().isoformat(),
@@ -85,12 +85,12 @@ async def readiness_check() -> Dict[str, Any]:
                 "genai": "ready" if genai_ready else "not_ready"
             }
         }
-        
+
         if not ready:
             raise HTTPException(status_code=503, detail="Service not ready")
-        
+
         return readiness_status
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -117,7 +117,24 @@ async def detailed_health_check() -> Dict[str, Any]:
     """
     try:
         settings = get_settings()
-        
+
+        # Parse database URL for detailed info
+        db_info = {"configured": bool(settings.database_url)}
+        if settings.database_url:
+            # Extract info from database URL
+            try:
+                import urllib.parse as urlparse
+                parsed = urlparse.urlparse(settings.database_url)
+                db_info.update({
+                    "host": parsed.hostname,
+                    "port": parsed.port,
+                    "database": parsed.path.lstrip('/') if parsed.path else None,
+                    "user": parsed.username
+                })
+            except Exception as e:
+                logger.warning(f"Could not parse database URL: {e}")
+                db_info["parse_error"] = str(e)
+
         detailed_status = {
             "status": "healthy",
             "timestamp": datetime.utcnow().isoformat(),
@@ -127,30 +144,31 @@ async def detailed_health_check() -> Dict[str, Any]:
             "debug": settings.debug,
             "log_level": settings.log_level,
             "configuration": {
-                "database": {
-                    "configured": bool(settings.database.database_url),
-                    "host": settings.database.database_host,
-                    "port": settings.database.database_port,
-                    "database": settings.database.database_name,
-                    "user": settings.database.database_user
-                },
+                "database": db_info,
                 "genai": {
-                    "configured": bool(settings.genai.genai_api_key),
-                    "base_url": settings.genai.genai_base_url,
-                    "model": settings.genai.genai_model,
-                    "embedding_model": settings.genai.genai_embedding_model
+                    "configured": bool(settings.genai_api_key),
+                    "base_url": settings.genai_api_url if settings.genai_api_url else None,
+                    "chat_model": settings.chat_model,
+                    "embedding_model": settings.embedding_model
                 }
             },
             "system_info": {
-                "python_version": "3.11+",  # Will be updated with actual version
+                "python_version": "3.11+",
                 "fastapi_version": "0.115+",
-                "platform": "Cloud Foundry"
+                "platform": "Local Development" if settings.environment == "development" else "Cloud Foundry"
             }
         }
-        
+
+        # Set overall status based on configuration
+        if settings.database_url and settings.genai_api_key:
+            detailed_status["status"] = "healthy"
+        elif not settings.database_url and not settings.genai_api_key:
+            detailed_status["status"] = "unhealthy"
+        else:
+            detailed_status["status"] = "degraded"
+
         return detailed_status
-        
+
     except Exception as e:
         logger.error(f"Detailed health check failed: {e}")
         raise HTTPException(status_code=500, detail="Detailed health check failed")
-

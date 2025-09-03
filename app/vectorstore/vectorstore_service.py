@@ -60,20 +60,20 @@ class VectorStoreService:
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
             return False
-    
-    async def store_report(self, 
-                          report_text: str, 
-                          classification: Dict[str, Any],
-                          aircraft_model: Optional[str] = None,
-                          report_date: Optional[datetime] = None) -> Optional[str]:
+
+    async def store_report(self,
+                           report_text: str,
+                           classification: Dict[str, Any],
+                           aircraft_model: Optional[str] = None,
+                           report_date: Optional[datetime] = None) -> Optional[str]:
         """Store a maintenance report with its classification and embedding.
-        
+
         Args:
             report_text: The maintenance report text
             classification: Classification results from Phase 3
             aircraft_model: Aircraft model (optional)
             report_date: Report date (optional)
-            
+
         Returns:
             Report ID if successful, None otherwise
         """
@@ -83,100 +83,262 @@ class VectorStoreService:
             if not embedding:
                 logger.error("Failed to generate embedding for report")
                 return None
-            
+
+            # Extract classification data from nested structure
+            # The classification dict has both summary and detailed sections
+            ata_data = classification.get('ata', {})
+            ispec_data = classification.get('ispec', {})
+            defect_data = classification.get('defect', {})
+
+            # Extract ATA chapter info - try different possible keys
+            ata_chapter = (
+                    ata_data.get('chapter') or
+                    classification.get('ata_chapter') or
+                    str(ata_data.get('chapter', '')).strip() or
+                    None
+            )
+
+            ata_chapter_name = (
+                    ata_data.get('chapter_name') or
+                    classification.get('ata_chapter_name') or
+                    None
+            )
+
+            # Extract other classification fields
+            defect_types = (
+                    defect_data.get('defect_types', []) or
+                    classification.get('defect_types', [])
+            )
+
+            maintenance_actions = (
+                    defect_data.get('maintenance_actions', []) or
+                    classification.get('maintenance_actions', [])
+            )
+
+            identified_parts = (
+                    ispec_data.get('identified_parts', []) or
+                    classification.get('identified_parts', [])
+            )
+
+            severity = (
+                    defect_data.get('severity') or
+                    classification.get('severity')
+            )
+
+            safety_critical = (
+                    defect_data.get('safety_critical') or
+                    classification.get('safety_critical', False)
+            )
+
+            overall_confidence = classification.get('overall_confidence', 0.0)
+
+            # Handle processing_notes - convert list to string if needed
+            processing_notes = classification.get('processing_notes', '')
+            if isinstance(processing_notes, list):
+                processing_notes = '; '.join(str(note) for note in processing_notes)
+            elif not isinstance(processing_notes, str):
+                processing_notes = str(processing_notes)
+
+            # Handle list fields that should be lists
+            if not isinstance(identified_parts, list):
+                identified_parts = [str(identified_parts)] if identified_parts else []
+
+            if not isinstance(defect_types, list):
+                defect_types = [str(defect_types)] if defect_types else []
+
+            if not isinstance(maintenance_actions, list):
+                maintenance_actions = [str(maintenance_actions)] if maintenance_actions else []
+
+            # Handle field length constraints
+            if ata_chapter and len(str(ata_chapter)) > 10:
+                ata_chapter = str(ata_chapter)[:10]
+                logger.warning(f"ATA chapter truncated to 10 chars: {ata_chapter}")
+
+            # Truncate confidence score to 10 characters (e.g., "0.34" instead of "0.33999999999999997")
+            confidence_str = f"{float(overall_confidence):.2f}"[:10]
+
+            # Truncate aircraft model if too long (though 100 chars should be enough)
+            if aircraft_model and len(aircraft_model) > 100:
+                aircraft_model = aircraft_model[:100]
+                logger.warning(f"Aircraft model truncated to 100 chars")
+
+            # Debug logging to see what we're actually storing
+            logger.info(f"Storing report with ATA: {ata_chapter} ({ata_chapter_name}), Defects: {defect_types}, Severity: {severity}")
+
             # Create report record
             report = MaintenanceReport(
                 report_text=report_text,
                 aircraft_model=aircraft_model,
                 report_date=report_date,
-                ata_chapter=classification.get('ata_chapter'),
-                ata_chapter_name=classification.get('ata_chapter_name'),
-                ispec_parts=classification.get('identified_parts', []),
-                defect_types=classification.get('defect_types', []),
-                maintenance_actions=classification.get('maintenance_actions', []),
-                severity=classification.get('severity'),
-                safety_critical=str(classification.get('safety_critical', False)).lower(),
-                confidence_score=str(classification.get('overall_confidence', 0.0)),
+                ata_chapter=ata_chapter,
+                ata_chapter_name=ata_chapter_name,
+                ispec_parts=identified_parts,
+                defect_types=defect_types,
+                maintenance_actions=maintenance_actions,
+                severity=severity,
+                safety_critical=str(safety_critical).lower()[:10],
+                confidence_score=confidence_str,
                 embedding=embedding,
-                classification_metadata=classification,
-                processing_notes=classification.get('processing_notes', '')
+                classification_metadata=classification,  # Store full classification JSON
+                processing_notes=processing_notes
             )
-            
+
             async with self.async_session_factory() as session:
                 session.add(report)
                 await session.commit()
                 await session.refresh(report)
-                
+
                 logger.info(f"Stored report with ID: {report.id}")
                 return str(report.id)
-                
+
         except Exception as e:
             logger.error(f"Error storing report: {e}")
             return None
-    
-    async def store_reports_batch(self, 
-                                 reports_data: List[Dict[str, Any]]) -> List[Optional[str]]:
+
+    async def store_reports_batch(self,
+                                  reports_data: List[Dict[str, Any]]) -> List[Optional[str]]:
         """Store multiple reports in batch.
-        
+
         Args:
             reports_data: List of dictionaries with report data and classification
-            
+
         Returns:
             List of report IDs (None for failed reports)
         """
         try:
             # Extract texts for batch embedding generation
             texts = [data['report_text'] for data in reports_data]
-            
+
             # Generate embeddings in batch
             embeddings = await self.embedding_service.generate_embeddings_batch_async(texts)
-            
+
             # Create report records
             reports = []
             report_ids = []
-            
+
             for i, (data, embedding) in enumerate(zip(reports_data, embeddings)):
                 if not embedding:
                     logger.warning(f"Failed to generate embedding for report {i}")
                     report_ids.append(None)
                     continue
-                
+
                 classification = data.get('classification', {})
-                
+
+                # Extract classification data from nested structure
+                ata_data = classification.get('ata', {})
+                ispec_data = classification.get('ispec', {})
+                defect_data = classification.get('defect', {})
+
+                # Extract ATA chapter info - try different possible keys
+                ata_chapter = (
+                        ata_data.get('chapter') or
+                        classification.get('ata_chapter') or
+                        str(ata_data.get('chapter', '')).strip() or
+                        None
+                )
+
+                ata_chapter_name = (
+                        ata_data.get('chapter_name') or
+                        classification.get('ata_chapter_name') or
+                        None
+                )
+
+                # Extract other classification fields
+                defect_types = (
+                        defect_data.get('defect_types', []) or
+                        classification.get('defect_types', [])
+                )
+
+                maintenance_actions = (
+                        defect_data.get('maintenance_actions', []) or
+                        classification.get('maintenance_actions', [])
+                )
+
+                identified_parts = (
+                        ispec_data.get('identified_parts', []) or
+                        classification.get('identified_parts', [])
+                )
+
+                severity = (
+                        defect_data.get('severity') or
+                        classification.get('severity')
+                )
+
+                safety_critical = (
+                        defect_data.get('safety_critical') or
+                        classification.get('safety_critical', False)
+                )
+
+                overall_confidence = classification.get('overall_confidence', 0.0)
+
+                # Handle processing_notes - convert list to string if needed
+                processing_notes = classification.get('processing_notes', '')
+                if isinstance(processing_notes, list):
+                    processing_notes = '; '.join(str(note) for note in processing_notes)
+                elif not isinstance(processing_notes, str):
+                    processing_notes = str(processing_notes)
+
+                # Handle list fields that should be lists
+                if not isinstance(identified_parts, list):
+                    identified_parts = [str(identified_parts)] if identified_parts else []
+
+                if not isinstance(defect_types, list):
+                    defect_types = [str(defect_types)] if defect_types else []
+
+                if not isinstance(maintenance_actions, list):
+                    maintenance_actions = [str(maintenance_actions)] if maintenance_actions else []
+
+                # Handle field length constraints
+                if ata_chapter and len(str(ata_chapter)) > 10:
+                    ata_chapter = str(ata_chapter)[:10]
+                    logger.warning(f"ATA chapter truncated to 10 chars: {ata_chapter}")
+
+                # Truncate confidence score to 10 characters
+                confidence_str = f"{float(overall_confidence):.2f}"[:10]
+
+                # Truncate aircraft model if too long
+                aircraft_model = data.get('aircraft_model')
+                if aircraft_model and len(aircraft_model) > 100:
+                    aircraft_model = aircraft_model[:100]
+                    logger.warning(f"Aircraft model truncated to 100 chars")
+
+                # Debug logging
+                logger.info(f"Batch storing report {i+1} with ATA: {ata_chapter} ({ata_chapter_name})")
+
                 report = MaintenanceReport(
                     report_text=data['report_text'],
-                    aircraft_model=data.get('aircraft_model'),
+                    aircraft_model=aircraft_model,
                     report_date=data.get('report_date'),
-                    ata_chapter=classification.get('ata_chapter'),
-                    ata_chapter_name=classification.get('ata_chapter_name'),
-                    ispec_parts=classification.get('identified_parts', []),
-                    defect_types=classification.get('defect_types', []),
-                    maintenance_actions=classification.get('maintenance_actions', []),
-                    severity=classification.get('severity'),
-                    safety_critical=str(classification.get('safety_critical', False)).lower(),
-                    confidence_score=str(classification.get('overall_confidence', 0.0)),
+                    ata_chapter=ata_chapter,
+                    ata_chapter_name=ata_chapter_name,
+                    ispec_parts=identified_parts,
+                    defect_types=defect_types,
+                    maintenance_actions=maintenance_actions,
+                    severity=severity,
+                    safety_critical=str(safety_critical).lower()[:10],
+                    confidence_score=confidence_str,
                     embedding=embedding,
-                    classification_metadata=classification,
-                    processing_notes=classification.get('processing_notes', '')
+                    classification_metadata=classification,  # Store full classification JSON
+                    processing_notes=processing_notes
                 )
-                
+
                 reports.append(report)
                 report_ids.append(str(report.id))
-            
+
             # Bulk insert
             if reports:
                 async with self.async_session_factory() as session:
                     session.add_all(reports)
                     await session.commit()
-                    
+
                 logger.info(f"Stored {len(reports)} reports in batch")
-            
+
             return report_ids
-            
+
         except Exception as e:
             logger.error(f"Error storing reports batch: {e}")
             return [None] * len(reports_data)
-    
+
     async def get_report(self, report_id: str) -> Optional[Dict[str, Any]]:
         """Get a report by ID.
         
