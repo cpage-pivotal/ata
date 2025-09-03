@@ -166,46 +166,82 @@ export const reportService = {
   },
 };
 
+// Fixed queryService in frontend/src/services/api.ts
 export const queryService = {
-  // Process natural language query
-  processQuery: async (
-    queryText: string,
-    options?: {
-      similarity_threshold?: number;
-      temperature?: number;
-      ata_chapter?: string;
-    }
-  ): Promise<QueryResponse> => {
-    const response = await apiClient.post('/api/query', {
-      query_text: queryText,
-      ...options,
-    });
-    return response.data;
-  },
+    // Process natural language query - FIXED to use FormData
+    processQuery: async (
+        queryText: string,
+        options?: {
+            similarity_threshold?: number;
+            temperature?: number;
+            ata_chapter?: string;
+            max_results?: number;
+            include_sources?: boolean;
+            query_type?: string;
+        }
+    ): Promise<QueryResponse> => {
+        // Create FormData instead of JSON
+        const formData = new FormData();
+        formData.append('query_text', queryText);
 
-  // Get query history
-  getHistory: async (limit = 20): Promise<Array<{ id: string; query_text: string; response: string; created_at: string }>> => {
-    const response = await apiClient.get('/api/query/history', {
-      params: { limit },
-    });
-    return response.data;
-  },
+        // Add optional parameters if provided
+        if (options?.max_results !== undefined) {
+            formData.append('max_results', options.max_results.toString());
+        }
+        if (options?.include_sources !== undefined) {
+            formData.append('include_sources', options.include_sources.toString());
+        }
+        if (options?.similarity_threshold !== undefined) {
+            formData.append('similarity_threshold', options.similarity_threshold.toString());
+        }
+        if (options?.temperature !== undefined) {
+            formData.append('temperature', options.temperature.toString());
+        }
+        if (options?.ata_chapter) {
+            formData.append('ata_chapter', options.ata_chapter);
+        }
+        if (options?.query_type) {
+            formData.append('query_type', options.query_type);
+        }
 
-  // Get query suggestions
-  getSuggestions: async (): Promise<string[]> => {
-    const response = await apiClient.get('/api/query/suggestions');
-    return response.data;
-  },
+        const response = await apiClient.post('/api/query', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+        return response.data;
+    },
 
-  // Submit feedback
-  submitFeedback: async (queryId: string, rating: number, feedback?: string): Promise<{ message: string }> => {
-    const response = await apiClient.post('/api/query/feedback', {
-      query_id: queryId,
-      rating,
-      feedback,
-    });
-    return response.data;
-  },
+    // Submit feedback - ALSO needs to be FormData based on backend
+    submitFeedback: async (queryId: string, helpful: boolean, feedbackText?: string): Promise<{ message: string }> => {
+        const formData = new FormData();
+        formData.append('query_id', queryId);
+        formData.append('helpful', helpful.toString());
+        if (feedbackText) {
+            formData.append('feedback_text', feedbackText);
+        }
+
+        const response = await apiClient.post('/api/query/feedback', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+        return response.data;
+    },
+
+    // Get query history - this one is fine as-is
+    getHistory: async (limit = 20): Promise<Array<{ id: string; query_text: string; response: string; created_at: string }>> => {
+        const response = await apiClient.get('/api/query/history', {
+            params: { limit },
+        });
+        return response.data;
+    },
+
+    // Get query suggestions - this one is fine as-is
+    getSuggestions: async (): Promise<string[]> => {
+        const response = await apiClient.get('/api/query/suggestions');
+        return response.data;
+    },
 };
 
 export const healthService = {
