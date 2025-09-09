@@ -5,168 +5,204 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000
 
 // Create axios instance with default config
 export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+    baseURL: API_BASE_URL,
+    timeout: 30000,
+    headers: {
+        'Content-Type': 'application/json',
+    },
 });
 
 // Request interceptor for logging
 apiClient.interceptors.request.use(
-  (config) => {
-    console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
-    return config;
-  },
-  (error) => {
-    console.error('API Request Error:', error);
-    return Promise.reject(error);
-  }
+    (config) => {
+        console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
+        return config;
+    },
+    (error) => {
+        console.error('API Request Error:', error);
+        return Promise.reject(error);
+    }
 );
 
 // Response interceptor for error handling
 apiClient.interceptors.response.use(
-  (response: AxiosResponse) => {
-    return response;
-  },
-  (error) => {
-    console.error('API Response Error:', error.response?.data || error.message);
-    return Promise.reject(error);
-  }
+    (response: AxiosResponse) => {
+        return response;
+    },
+    (error) => {
+        console.error('API Response Error:', error.response?.data || error.message);
+        return Promise.reject(error);
+    }
 );
 
 // Type definitions
 export interface MaintenanceReport {
-  id: string;
-  report_text: string;
-  aircraft_model?: string;
-  report_date?: string;
-  ata_chapter?: string;
-  ata_chapter_name?: string;
-  ispec_part?: string;
-  defect_type?: string;
-  severity?: string;
-  safety_critical?: boolean;
-  created_at: string;
-  updated_at: string;
+    id: string;
+    report_text: string;
+    aircraft_model?: string;
+    report_date?: string;
+    ata_chapter?: string;
+    ata_chapter_name?: string;
+    ispec_part?: string;
+    defect_type?: string;
+    severity?: string;
+    safety_critical?: boolean;
+    created_at: string;
+    updated_at: string;
 }
 
 export interface Classification {
-  ata_chapter?: string;
-  ata_chapter_name?: string;
-  defect_types: string[];
-  maintenance_actions: string[];
-  identified_parts: string[];
-  severity: string;
-  safety_critical: boolean;
-  overall_confidence: number;
-  processing_notes?: string[];
+    ata_chapter?: string;
+    ata_chapter_name?: string;
+    defect_types: string[];
+    maintenance_actions: string[];
+    identified_parts: string[];
+    severity: string;
+    safety_critical: boolean;
+    overall_confidence: number;
+    processing_notes?: string[];
 }
 
 export interface QueryResponse {
-  response: string;
-  sources: Array<{
-    report_id: string;
-    aircraft_model?: string;
-    ata_chapter?: string;
-    ata_chapter_name?: string;
-    similarity_score: number;
-    excerpt: string;
-    safety_critical: boolean;
-    severity: string;
-  }>;
-  metadata: {
-    processing_time_ms: number;
-    total_sources_considered: number;
-    confidence_score: number;
-    query_type: string;
-    model_used: string;
-  };
+    response: string;
+    sources: Array<{
+        report_id: string;
+        aircraft_model?: string;
+        ata_chapter?: string;
+        ata_chapter_name?: string;
+        similarity_score: number;
+        excerpt: string;
+        safety_critical: boolean;
+        severity: string;
+    }>;
+    metadata: {
+        processing_time_ms: number;
+        total_sources_considered: number;
+        confidence_score: number;
+        query_type: string;
+        model_used: string;
+    };
 }
 
 export interface ReportStats {
-  total_reports: number;
-  reports_by_ata_chapter: Record<string, number>;
-  reports_by_severity: Record<string, number>;
-  reports_by_aircraft_model: Record<string, number>;
-  safety_critical_count: number;
-  recent_reports_count: number;
+    total_reports: number;
+    reports_by_ata_chapter: Record<string, number>;
+    reports_by_severity: Record<string, number>;
+    reports_by_aircraft_model: Record<string, number>;
+    safety_critical_count: number;
+    recent_reports_count: number;
 }
 
 // API Service functions
 export const reportService = {
-  // Upload multiple reports from file
-  uploadReports: async (file: File): Promise<{ message: string; processed: number; errors: number }> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const response = await apiClient.post('/api/reports/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-    return response.data;
-  },
+    // Upload multiple reports from file
+    uploadReports: async (file: File): Promise<{ message: string; processed: number; errors: number }> => {
+        const formData = new FormData();
+        formData.append('file', file);
 
-  // Ingest single report
-  ingestReport: async (reportText: string, aircraftModel?: string): Promise<{ report_id: string; classification: Classification }> => {
-    const response = await apiClient.post('/api/reports/ingest', {
-      report_text: reportText,
-      aircraft_model: aircraftModel,
-    });
-    return response.data;
-  },
+        const response = await apiClient.post('/api/reports/upload', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+        return response.data;
+    },
 
-  // Get all reports with pagination
-  getReports: async (skip = 0, limit = 50): Promise<{ reports: MaintenanceReport[]; total: number }> => {
-    const response = await apiClient.get('/api/reports/', {
-      params: { skip, limit },
-    });
-    return response.data;
-  },
+    // Ingest single report
+    ingestReport: async (reportText: string, aircraftModel?: string): Promise<{ report_id: string; classification: Classification }> => {
+        const response = await apiClient.post('/api/reports/ingest', {
+            report_text: reportText,
+            aircraft_model: aircraftModel,
+        });
+        return response.data;
+    },
 
-  // Get specific report
-  getReport: async (reportId: string): Promise<MaintenanceReport> => {
-    const response = await apiClient.get(`/api/reports/${reportId}`);
-    return response.data;
-  },
+    // Get all reports with pagination
+    getReports: async (skip = 0, limit = 50): Promise<{ reports: MaintenanceReport[]; total: number }> => {
+        const response = await apiClient.get('/api/reports/', {
+            params: { skip, limit },
+        });
+        return response.data;
+    },
 
-  // Get report statistics
-  getStats: async (): Promise<ReportStats> => {
-    const response = await apiClient.get('/api/reports/stats/summary');
-    return response.data;
-  },
+    // Get specific report
+    getReport: async (reportId: string): Promise<MaintenanceReport> => {
+        const response = await apiClient.get(`/api/reports/${reportId}`);
+        return response.data;
+    },
 
-  // Semantic search
-  searchReports: async (
-    queryText: string,
-    limit = 10,
-    similarityThreshold = 0.7,
-    filters?: {
-      ata_chapter?: string;
-      severity?: string;
-      aircraft_model?: string;
-    }
-  ): Promise<{ reports: MaintenanceReport[]; total: number }> => {
-    const response = await apiClient.post('/api/reports/search', {
-      query_text: queryText,
-      limit,
-      similarity_threshold: similarityThreshold,
-      filters: filters || {},
-    });
-    return response.data;
-  },
+    // Get report statistics
+    getStats: async (): Promise<ReportStats> => {
+        const response = await apiClient.get('/api/reports/stats/summary');
+        return response.data;
+    },
 
-  // Classify report text
-  classifyReport: async (reportText: string): Promise<Classification> => {
-    const response = await apiClient.post('/api/reports/classify', {
-      report_text: reportText,
-    });
-    return response.data;
-  },
+    // FIXED: Semantic search - now uses FormData and handles actual backend response structure
+    searchReports: async (
+        queryText: string,
+        limit = 10,
+        similarityThreshold = 0.7,
+        filters?: {
+            ata_chapter?: string;
+            severity?: string;
+            aircraft_model?: string;
+            defect_type?: string;
+        }
+    ): Promise<{ reports: MaintenanceReport[]; total: number }> => {
+        // Create FormData to match backend Form(...) parameters
+        const formData = new FormData();
+
+        // Required parameter - note: backend expects "query" not "query_text"
+        formData.append('query', queryText);
+        formData.append('limit', limit.toString());
+        formData.append('similarity_threshold', similarityThreshold.toString());
+
+        // Add individual filter parameters if provided
+        if (filters?.ata_chapter) {
+            formData.append('ata_chapter', filters.ata_chapter);
+        }
+        if (filters?.severity) {
+            formData.append('severity', filters.severity);
+        }
+        if (filters?.aircraft_model) {
+            formData.append('aircraft_model', filters.aircraft_model);
+        }
+        if (filters?.defect_type) {
+            formData.append('defect_type', filters.defect_type);
+        }
+
+        const response = await apiClient.post('/api/reports/search', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+
+        // Transform backend response to match frontend expectations
+        // Backend returns: { results: [...], results_count: n }
+        // Frontend expects: { reports: [...], total: n }
+        const backendData = response.data;
+
+        return {
+            reports: Array.isArray(backendData.results) ? backendData.results : [],
+            total: backendData.results_count || 0
+        };
+    },
+
+    // FIXED: Classify report text - now uses FormData to match backend expectations
+    classifyReport: async (reportText: string): Promise<Classification> => {
+        const formData = new FormData();
+        formData.append('report_text', reportText);
+
+        const response = await apiClient.post('/api/reports/classify', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            },
+        });
+        return response.data;
+    },
 };
 
-// Fixed queryService in frontend/src/services/api.ts
+// Query service with FormData handling (already fixed)
 export const queryService = {
     // Process natural language query - FIXED to use FormData
     processQuery: async (
@@ -245,19 +281,19 @@ export const queryService = {
 };
 
 export const healthService = {
-  // Basic health check
-  checkHealth: async (): Promise<{ status: string; timestamp: string }> => {
-    const response = await apiClient.get('/api/health');
-    return response.data;
-  },
+    // Basic health check
+    checkHealth: async (): Promise<{ status: string; timestamp: string }> => {
+        const response = await apiClient.get('/api/health');
+        return response.data;
+    },
 
-  // Detailed health check
-  checkDetailedHealth: async (): Promise<{
-    status: string;
-    services: Record<string, { status: string; details?: any }>;
-    timestamp: string;
-  }> => {
-    const response = await apiClient.get('/api/health/detailed');
-    return response.data;
-  },
+    // Detailed health check
+    checkDetailedHealth: async (): Promise<{
+        status: string;
+        services: Record<string, { status: string; details?: any }>;
+        timestamp: string;
+    }> => {
+        const response = await apiClient.get('/api/health/detailed');
+        return response.data;
+    },
 };
