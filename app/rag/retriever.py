@@ -22,7 +22,7 @@ class Retriever:
     async def retrieve_relevant_reports(self, 
                                       query: str,
                                       max_results: int = 10,
-                                      similarity_threshold: float = 0.5,
+                                      similarity_threshold: float = 0.3,
                                       filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Retrieve maintenance reports relevant to the query.
         

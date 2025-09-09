@@ -32,7 +32,7 @@ class RAGPipeline:
     async def process_query(self, 
                           query: str,
                           max_results: int = 10,
-                          similarity_threshold: float = 0.5,
+                          similarity_threshold: float = 0.4,
                           temperature: float = 0.7,
                           filters: Optional[Dict[str, Any]] = None,
                           store_query: bool = True) -> Dict[str, Any]:
@@ -129,7 +129,7 @@ class RAGPipeline:
     async def process_streaming_query(self, 
                                     query: str,
                                     max_results: int = 10,
-                                    similarity_threshold: float = 0.5,
+                                    similarity_threshold: float = 0.3,
                                     temperature: float = 0.7,
                                     filters: Optional[Dict[str, Any]] = None) -> AsyncGenerator[Dict[str, Any], None]:
         """Process a streaming RAG query.
